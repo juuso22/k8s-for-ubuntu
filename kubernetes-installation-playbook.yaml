@@ -80,6 +80,16 @@
         mkdir -p $HOME/.kube
         sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
         sudo chown $(id -u):$(id -g) $HOME/.kube/config
+  - name: Get k8s nodes
+    shell: kubectl get node -o name
+    register: k8s_nodes
+  - name: Remove control plane taints if there is only one node
+    shell: |
+      kubectl taint node --all=true node-role.kubernetes.io/master=:NoSchedule-
+      kubectl taint node --all=true node-role.kubernetes.io/control-plane=:NoSchedule-
+    when: k8s_nodes.stdout_lines|length == 1
+    register: command_result
+    failed_when: "'not found' not in command_result.stderr"
   - name: Install pip module for k8s
     pip:
       name: kubernetes
