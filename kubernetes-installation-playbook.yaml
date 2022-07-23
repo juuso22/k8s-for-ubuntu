@@ -1,0 +1,99 @@
+- hosts: all
+  tasks:
+  - name: Disable swap
+    ansible.builtin.shell: swapoff -a
+    become: yes
+  - block:
+    - name: Check br_netfilter kernel module
+      shell: lsmod | grep br_netfilter
+    rescue:
+    - name: Install br_netfilter
+      modprobe:
+        name: br_netfilter
+        state: present
+      become: yes
+  - block:
+    - name: Check br_overlay kernel module
+      shell: lsmod | grep overlay
+    rescue:
+    - name: Install overlay
+      modprobe:
+        name: overlay
+        state: present
+      become: yes
+  - name: Load overlay and br_netfilter modules at startup
+    shell: |
+      cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+      overlay
+      br_netfilter
+      EOF
+  - name: Set sysctl params
+    shell: |
+      cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+      EOF
+  - name: Apply sysctl params
+    shell: sysctl --system
+    become: yes
+  - name: Install pre-requisite packages
+    apt:
+      pkg:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - containerd
+      - python3
+      - pip
+      update_cache: yes
+    become: yes
+  - name: Download Google Cloud public signing key
+    shell: curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    become: yes
+  - name: Add k8s apt repo
+    shell: echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+  - name: Install kubernetes components
+    apt:
+      pkg:
+      - kubeadm
+      - kubelet
+      - kubectl
+      state: present
+      update_cache: yes
+    become: yes
+  - name: Copy kubeadm config to server
+    copy:
+      src: kubeadm-config.yaml
+      dest: /etc/kubeadm-config.yaml
+      mode: '0644'
+    become: yes
+  - block:
+    - name: Check if k8s is already initialized
+      shell: kubectl get nodes
+    rescue:
+    - name: Init k8s cluster
+      shell: kubeadm init --config /etc/kubeadm-config.yaml
+      become: yes
+    - name: Setup k8s config for the user
+      shell: |
+        mkdir -p $HOME/.kube
+        sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+  - name: Install pip module for k8s
+    pip:
+      name: kubernetes
+  - name: Fetch Calico network plugin manifest
+    get_url:
+      url: https://docs.projectcalico.org/manifests/calico.yaml
+      dest: /etc/kubernetes/manifests/calico.yaml
+      mode: '0664'
+    become: yes
+    tags:
+      - calico
+  - name: Install Calico networking plugin
+    kubernetes.core.k8s:
+      state: present
+      src: /etc/kubernetes/manifests/calico.yaml
+    tags:
+      - calico
