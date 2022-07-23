@@ -89,7 +89,7 @@
       kubectl taint node --all=true node-role.kubernetes.io/control-plane=:NoSchedule-
     when: k8s_nodes.stdout_lines|length == 1
     register: command_result
-    failed_when: "'not found' not in command_result.stderr"
+    failed_when: "'not found' not in command_result.stderr or command_result.rc == 0" 
   - name: Install pip module for k8s
     pip:
       name: kubernetes
