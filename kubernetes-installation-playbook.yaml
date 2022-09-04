@@ -83,9 +83,17 @@
   - name: Get k8s nodes
     shell: kubectl get node -o name
     register: k8s_nodes
-  - name: Remove control plane taints if there is only one node
+    until: "k8s_nodes is not failed"
+    retries: 10
+    delay: 3
+  - name: Remove master taint if there is only one node
     shell: |
       kubectl taint node --all=true node-role.kubernetes.io/master=:NoSchedule-
+    when: k8s_nodes.stdout_lines|length == 1
+    register: command_result
+    failed_when: "'not found' not in command_result.stderr or command_result.rc == 0" 
+  - name: Remove control-plane taint if there is only one node
+    shell: |
       kubectl taint node --all=true node-role.kubernetes.io/control-plane=:NoSchedule-
     when: k8s_nodes.stdout_lines|length == 1
     register: command_result
